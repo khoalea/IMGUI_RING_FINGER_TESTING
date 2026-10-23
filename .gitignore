@@ -1,0 +1,32 @@
+# Build output
+build/
+build-*/
+Debug/
+Release/
+*.o
+*.d
+*.su
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# Python
+__pycache__/
+*.pyc
+*.bak
+
+# Archives (attach to GitHub Release instead)
+*.zip
+*.tar.gz
+
+# Local tooling / per-user state
+.remember/
+imgui.ini
+*.launch
+
+# Stray CubeIDE metadata at repo root (projects keep their own)
+/.mxproject
+/.project
+/.settings/

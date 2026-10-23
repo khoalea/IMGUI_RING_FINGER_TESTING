@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XL330 Calib Tool</title>
+<style>
+  :root{
+    --bg:#12151a; --panel:#1a1f27; --panel2:#212832; --line:#2c3542;
+    --ink:#e6ebf2; --dim:#8b97a8; --accent:#4ea3ff; --ok:#3ddc84;
+    --warn:#ffb020; --err:#ff5c5c; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+         padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+  h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.02em}
+  .spacer{flex:1}
+  button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+         border-radius:6px;padding:7px 13px;font-size:13px;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--accent)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
+  button.danger{background:var(--err);border-color:var(--err);color:#1a0505;font-weight:600}
+  input,select{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+               border-radius:6px;padding:6px 9px;font-size:13px;font-family:var(--mono)}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  #dot{width:9px;height:9px;border-radius:50%;background:var(--err);flex:none}
+  #dot.on{background:var(--ok)}
+  nav{display:flex;gap:2px;padding:0 18px;background:var(--panel);
+      border-bottom:1px solid var(--line)}
+  nav button{border:none;background:none;border-radius:0;border-bottom:2px solid transparent;
+             padding:10px 16px;color:var(--dim)}
+  nav button.sel{color:var(--ink);border-bottom-color:var(--accent)}
+  main{padding:18px;max-width:1100px}
+  section{display:none} section.sel{display:block}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:16px;margin-bottom:16px}
+  .card h2{font-size:13px;margin:0 0 12px;color:var(--dim);font-weight:600;
+           text-transform:uppercase;letter-spacing:.06em}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .row + .row{margin-top:10px}
+  label{color:var(--dim);font-size:12px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .stat{background:var(--panel2);border-radius:8px;padding:10px 12px}
+  .stat .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .stat .v{font-family:var(--mono);font-size:20px;margin-top:3px;
+           font-variant-numeric:tabular-nums}
+  canvas{width:100%;display:block;background:var(--bg);border-radius:8px;
+         border:1px solid var(--line)}
+  .tblwrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:13px}
+  th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);
+        white-space:nowrap;font-variant-numeric:tabular-nums}
+  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;
+     letter-spacing:.05em}
+  th:first-child,td:first-child{text-align:left}
+  .note{color:var(--dim);font-size:12px;margin-top:10px}
+  .banner{border-radius:8px;padding:11px 13px;margin:12px 0;font-size:13px;display:none}
+  .banner.show{display:block}
+  .banner.warn{background:rgba(255,176,32,.1);border:1px solid var(--warn);color:var(--warn)}
+  .banner.err{background:rgba(255,92,92,.1);border:1px solid var(--err);color:var(--err)}
+  #log{font-family:var(--mono);font-size:12px;height:150px;overflow-y:auto;
+       background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px}
+  #log div{white-space:pre-wrap}
+  .tx{color:var(--accent)} .rx{color:var(--ok)} .er{color:var(--err)}
+</style>
+</head>
+<body>
+
+<header>
+  <div id="dot"></div>
+  <h1>XL330 Calib Tool</h1>
+  <span id="conninfo" style="color:var(--dim);font-size:12px"></span>
+  <div class="spacer"></div>
+  <button id="btnConnect" class="primary">Kết nối</button>
+  <button id="btnDisconnect" disabled>Ngắt</button>
+</header>
+
+<nav>
+  <button data-tab="tlm" class="sel">Telemetry</button>
+  <button data-tab="force">Calib lực</button>
+  <button data-tab="reg">Register</button>
+</nav>
+
+<main>
+<div id="unsupported" class="banner err">
+  Trình duyệt này không có Web Serial API. Cần Chrome hoặc Edge trên desktop,
+  và trang phải mở qua http://localhost (không chạy được từ file://).
+</div>
+
+<!-- ================= TELEMETRY ================= -->
+<section id="tab-tlm" class="sel">
+  <div class="card">
+    <h2>Stream</h2>
+    <div class="row">
+      <label>Chu kỳ</label>
+      <select id="tlmRate">
+        <option value="0">tắt</option>
+        <option value="20">20 ms (50 Hz)</option>
+        <option value="50" selected>50 ms (20 Hz)</option>
+        <option value="200">200 ms (5 Hz)</option>
+      </select>
+      <button id="btnTlmApply">Áp dụng</button>
+      <div class="spacer"></div>
+      <button id="btnClearChart">Xoá đồ thị</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Hiện tại</h2>
+    <div class="stats">
+      <div class="stat"><div class="k">Vị trí</div><div class="v" id="sPos">–</div></div>
+      <div class="stat"><div class="k">Vận tốc</div><div class="v" id="sVel">–</div></div>
+      <div class="stat"><div class="k">Dòng (mA)</div><div class="v" id="sCur">–</div></div>
+      <div class="stat"><div class="k">Bus status</div><div class="v" id="sBus">–</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Dòng điện theo thời gian</h2>
+    <canvas id="chartCur" height="180"></canvas>
+    <h2 style="margin-top:16px">Vị trí theo thời gian</h2>
+    <canvas id="chartPos" height="180"></canvas>
+  </div>
+</section>
+
+<!-- ================= FORCE CALIB ================= -->
+<section id="tab-force">
+  <div class="card">
+    <h2>Quy trình</h2>
+    <div class="row">
+      <button id="btnTare">1. Tare (chưa treo tạ)</button>
+      <span id="tareState" style="color:var(--dim);font-size:12px">chưa tare</span>
+    </div>
+    <div class="row">
+      <label>2. Khối lượng đang treo (g)</label>
+      <input id="weightG" type="number" value="100" step="10" style="width:90px">
+      <button id="btnMeasure" class="primary">Đo</button>
+      <span id="ftBusy" style="color:var(--warn);font-size:12px"></span>
+    </div>
+    <div class="note">
+      Tare đo riêng cánh tay đòn và ma sát. Bỏ bước này thì mọi số đo lệch một
+      lượng cố định. Cánh tay đòn phải nằm ngang lúc đo.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Kết quả lần đo gần nhất</h2>
+    <div class="stats">
+      <div class="stat"><div class="k">Dòng thực (mA)</div><div class="v" id="rNet">–</div></div>
+      <div class="stat"><div class="k">Moment tải (mN·m)</div><div class="v" id="rTorque">–</div></div>
+      <div class="stat"><div class="k">kt (µN·m/mA)</div><div class="v" id="rKt">–</div></div>
+      <div class="stat"><div class="k">Dao động (mA)</div><div class="v" id="rRipple">–</div></div>
+    </div>
+    <div id="ftWarn" class="banner warn"></div>
+  </div>
+
+  <div class="card">
+    <h2>Bảng đo</h2>
+    <div class="tblwrap">
+      <table id="ftTable">
+        <thead><tr>
+          <th>#</th><th>Khối lượng (g)</th><th>Dòng thực (mA)</th>
+          <th>Moment (µN·m)</th><th>kt (µN·m/mA)</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="btnClearTable">Xoá bảng</button>
+      <div class="spacer"></div>
+      <span id="fitOut" style="font-family:var(--mono);font-size:13px"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Moment – dòng điện</h2>
+    <canvas id="chartFit" height="240"></canvas>
+    <div class="note">
+      Đường thẳng là hồi quy qua gốc toạ độ. Các điểm lệch xa đường nghĩa là
+      phi tuyến: ma sát lớn, cánh tay đòn không ngang, hoặc chạm giới hạn dòng.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Ghi xuống flash STM32</h2>
+    <div class="row">
+      <label>torque_rate</label><input id="calRate" type="number" step="any" style="width:120px">
+      <label>torque_gain</label><input id="calGain" type="number" step="any" style="width:120px">
+      <label>torque_limit</label><input id="calLimit" type="number" step="any" style="width:120px">
+    </div>
+    <div class="row">
+      <button id="btnCalGet">Đọc từ board</button>
+      <button id="btnUseFit">Lấy kt vừa fit</button>
+      <div class="spacer"></div>
+      <button id="btnCalSave" class="primary">Ghi vào flash</button>
+    </div>
+    <div class="note">
+      CAL_SET chỉ sửa bản trong RAM của STM32; phải bấm "Ghi vào flash" mới
+      xoá/ghi trang flash tại 0x0800FC00 và tính lại CRC.
+    </div>
+  </div>
+</section>
+
+<!-- ================= REGISTER ================= -->
+<section id="tab-reg">
+  <div class="card">
+    <h2>Control table XL330</h2>
+    <div class="row">
+      <label>Motor ID</label><input id="regId" type="number" value="5" style="width:70px">
+      <label>Thanh ghi</label>
+      <select id="regPick" style="min-width:230px"></select>
+    </div>
+    <div class="row">
+      <label>Địa chỉ</label><input id="regAddr" type="number" value="132" style="width:90px">
+      <label>Độ dài</label>
+      <select id="regLen"><option>1</option><option>2</option><option selected>4</option></select>
+      <label>Giá trị</label><input id="regVal" type="number" value="0" style="width:140px">
+    </div>
+    <div class="row">
+      <button id="btnRegRead">Đọc</button>
+      <button id="btnRegWrite" class="danger">Ghi</button>
+      <span id="regState" style="color:var(--dim);font-size:12px"></span>
+    </div>
+    <div id="regWarn" class="banner warn"></div>
+  </div>
+
+  <div class="card">
+    <h2>Nhật ký</h2>
+    <div id="log"></div>
+  </div>
+</section>
+</main>
+
+<script>
+"use strict";
+
+/* ==================== Giao thức ==================== */
+const HDR1=0xAA, HDR2=0x55, FTR=0x03;
+
+const CMD = {
+  PING:0x01, TLM_RATE:0x10, FT_CMD:0x20, FT_GET:0x21,
+  REG_READ:0x30, REG_WRITE:0x31,
+  CAL_GET:0x40, CAL_SET:0x41, CAL_SAVE:0x42,
+};
+const RSP = {
+  PONG:0x81, TLM:0x90, FT_STATE:0xA0, REG_VALUE:0xB0, CAL_DATA:0xC0, ERR:0xEE,
+};
+const FT = { MEASURE:1, TARE:2, CLEAR_LOG:3 };
+const ERRNAME = {1:"BAD_LEN",2:"UNKNOWN_CMD",3:"BUS",4:"FLASH",5:"PARAM"};
+
+function buildFrame(type, payload){
+  payload = payload || new Uint8Array(0);
+  const f = new Uint8Array(6 + payload.length);
+  f[0]=HDR1; f[1]=HDR2; f[2]=type; f[3]=payload.length;
+  f.set(payload, 4);
+  let cs = (type + payload.length) & 0xFF;
+  for (const b of payload) cs = (cs + b) & 0xFF;
+  f[4+payload.length] = cs;
+  f[5+payload.length] = FTR;
+  return f;
+}
+
+/* FSM giải khung, gương của process_byte() trong pc_link.c */
+const S={H1:0,H2:1,TYPE:2,LEN:3,PAY:4,CS:5,FTR:6};
+let st=S.H1, fType=0, fLen=0, fIdx=0, fCs=0, fPay=new Uint8Array(64);
+
+function feed(bytes, onFrame){
+  for (const b of bytes){
+    switch(st){
+      case S.H1: if (b===HDR1) st=S.H2; break;
+      case S.H2: st = (b===HDR2)?S.TYPE : (b===HDR1?S.H2:S.H1); break;
+      case S.TYPE: fType=b; st=S.LEN; break;
+      case S.LEN:
+        if (b>64){ st=S.H1; break; }
+        fLen=b; fIdx=0; fCs=(fType+fLen)&0xFF; st=(fLen===0)?S.CS:S.PAY; break;
+      case S.PAY:
+        fPay[fIdx++]=b; fCs=(fCs+b)&0xFF;
+        if (fIdx>=fLen) st=S.CS; break;
+      case S.CS: st = (b===fCs)?S.FTR:S.H1; break;
+      case S.FTR:
+        if (b===FTR) onFrame(fType, fPay.slice(0,fLen));
+        st=S.H1; break;
+    }
+  }
+}
+
+/* ==================== Cổng serial ==================== */
+let port=null, reader=null, writer=null, keepReading=false;
+
+const $ = id => document.getElementById(id);
+const dot=$("dot"), log=$("log");
+
+function logLine(cls, text){
+  const d=document.createElement("div");
+  d.className=cls; d.textContent=text;
+  log.appendChild(d);
+  while (log.childNodes.length>250) log.removeChild(log.firstChild);
+  log.scrollTop=log.scrollHeight;
+}
+const hex = u8 => Array.from(u8).map(b=>b.toString(16).padStart(2,"0")).join(" ");
+
+async function send(type, payload){
+  if (!writer) return;
+  const f = buildFrame(type, payload);
+  if (type !== CMD.FT_GET) logLine("tx", "TX " + hex(f));
+  await writer.write(f);
+}
+
+async function connect(){
+  try{
+    port = await navigator.serial.requestPort();
+    await port.open({baudRate:115200, dataBits:8, stopBits:1, parity:"none"});
+    writer = port.writable.getWriter();
+    reader = port.readable.getReader();
+    keepReading = true;
+    dot.classList.add("on");
+    $("btnConnect").disabled=true; $("btnDisconnect").disabled=false;
+    $("conninfo").textContent = "115200 8N1";
+    readLoop();
+    await send(CMD.PING);
+    await send(CMD.CAL_GET);
+  }catch(e){ logLine("er","Kết nối lỗi: "+e.message); }
+}
+
+async function readLoop(){
+  try{
+    while (keepReading){
+      const {value, done} = await reader.read();
+      if (done) break;
+      if (value) feed(value, onFrame);
+    }
+  }catch(e){ logLine("er","Đọc lỗi: "+e.message); }
+}
+
+async function disconnect(){
+  keepReading=false;
+  try{ if(reader){ await reader.cancel(); reader.releaseLock(); } }catch(e){}
+  try{ if(writer){ writer.releaseLock(); } }catch(e){}
+  try{ if(port){ await port.close(); } }catch(e){}
+  port=reader=writer=null;
+  dot.classList.remove("on");
+  $("btnConnect").disabled=false; $("btnDisconnect").disabled=true;
+  $("conninfo").textContent="";
+}
+
+/* ==================== Xử lý khung nhận ==================== */
+const dv = u8 => new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+
+function onFrame(type, p){
+  const v = dv(p);
+  switch(type){
+    case RSP.PONG:
+      logLine("rx", `RX PONG proto=${p[0]} motor_id=${p[1]}`);
+      break;
+    case RSP.TLM:
+      onTlm(v.getInt32(0,true), v.getInt32(4,true), v.getInt32(8,true), p[12]);
+      break;
+    case RSP.FT_STATE:
+      onForceState(p, v);
+      break;
+    case RSP.REG_VALUE:
+      onRegValue(p[0], v.getUint16(1,true), p[3], v.getUint32(4,true));
+      break;
+    case RSP.CAL_DATA:
+      onCalData(v);
+      break;
+    case RSP.ERR:
+      logLine("er", `RX ERR ${ERRNAME[p[0]]||p[0]} (lệnh 0x${p[1].toString(16)})`);
+      break;
+    default:
+      logLine("er", `RX type lạ 0x${type.toString(16)}`);
+  }
+}
+
+/* ==================== Telemetry ==================== */
+const HIST = 400;
+const hCur=[], hPos=[];
+
+function onTlm(pos, vel, cur, bus){
+  $("sPos").textContent = pos;
+  $("sVel").textContent = vel;
+  $("sCur").textContent = cur;
+  $("sBus").textContent = bus === 0 ? "OK" : bus;
+  hCur.push(cur); if (hCur.length>HIST) hCur.shift();
+  hPos.push(pos); if (hPos.length>HIST) hPos.shift();
+  drawSeries($("chartCur"), hCur, "#4ea3ff");
+  drawSeries($("chartPos"), hPos, "#3ddc84");
+}
+
+function fitCanvas(c){
+  const r = window.devicePixelRatio || 1;
+  // Chiều cao CSS phải nhớ riêng: c.height bị ghi đè thành pixel vật lý ngay
+  // lần vẽ đầu, đọc lại nó ở lần sau sẽ ra sai số nhân dồn theo DPR.
+  if (c._css === undefined) c._css = c.height;
+  const w = c.clientWidth, h = c._css;
+  if (c.width !== Math.round(w*r) || c.height !== Math.round(h*r)){
+    c.width = Math.round(w*r);
+    c.height = Math.round(h*r);
+    c.style.height = h + "px";
+  }
+  const g = c.getContext("2d");
+  g.setTransform(r,0,0,r,0,0);
+  return {g, w, h};
+}
+
+function drawSeries(c, data, color){
+  const {g,w,h} = fitCanvas(c);
+  g.clearRect(0,0,w,h);
+  if (data.length < 2) return;
+
+  let mn=Math.min(...data), mx=Math.max(...data);
+  if (mn===mx){ mn-=1; mx+=1; }
+  const pad = (mx-mn)*0.1; mn-=pad; mx+=pad;
+  const X = i => (i/(data.length-1))*(w-46)+40;
+  const Y = v => h-18 - ((v-mn)/(mx-mn))*(h-30);
+
+  g.strokeStyle="#2c3542"; g.lineWidth=1;
+  g.fillStyle="#8b97a8"; g.font="10px ui-monospace,monospace"; g.textAlign="right";
+  for (let i=0;i<=3;i++){
+    const val = mn + (mx-mn)*i/3, y = Y(val);
+    g.beginPath(); g.moveTo(40,y); g.lineTo(w-6,y); g.stroke();
+    g.fillText(val.toFixed(0), 36, y+3);
+  }
+  g.strokeStyle=color; g.lineWidth=1.6; g.beginPath();
+  data.forEach((v,i)=> i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));
+  g.stroke();
+}
+
+$("btnTlmApply").onclick = async ()=>{
+  const ms = parseInt($("tlmRate").value,10);
+  const p = new Uint8Array(2); new DataView(p.buffer).setUint16(0, ms, true);
+  await send(CMD.TLM_RATE, p);
+};
+$("btnClearChart").onclick = ()=>{
+  hCur.length=0; hPos.length=0;
+  drawSeries($("chartCur"), hCur, "#4ea3ff");
+  drawSeries($("chartPos"), hPos, "#3ddc84");
+};
+
+/* ==================== Calib lực ==================== */
+let ftPoll=null, ftPending=null;   // ftPending = khối lượng đang chờ kết quả
+const rows=[];
+
+function onForceState(p, v){
+  const busy=p[0], ready=p[1], tareValid=p[2], hitCeil=p[3];
+  const tare      = v.getInt32(4,true);
+  const weight    = v.getInt32(8,true);
+  const avg       = v.getInt32(12,true);
+  const mn        = v.getInt32(16,true);
+  const mx        = v.getInt32(20,true);
+  const net       = v.getInt32(24,true);
+  const torque    = v.getInt32(28,true);
+  const kt        = v.getInt32(32,true);
+  const brk       = v.getInt32(40,true);
+
+  $("tareState").textContent = tareValid ? `tare = ${tare} mA` : "chưa tare";
+  $("ftBusy").textContent = busy ? "đang đo…" : "";
+
+  const warn=$("ftWarn");
+  if (hitCeil){
+    warn.className="banner warn show";
+    warn.textContent="Chạm trần dòng mà chưa nhấc nổi tải. Kiểm tra FTEST_RAMP_DIR "
+                    +"có đúng chiều không, trước khi nghĩ tới việc nâng FTEST_RAMP_MAX_MA.";
+  } else warn.className="banner warn";
+
+  if (busy || !ready) return;
+
+  $("rNet").textContent    = net;
+  $("rTorque").textContent = (torque/1000).toFixed(2);
+  $("rKt").textContent     = kt;
+  $("rRipple").textContent = (brk !== 0) ? "–" : (mx-mn);
+
+  if (ftPending !== null){
+    stopFtPoll();
+    if (weight > 0){
+      rows.push({w:weight, i:net, t:torque, kt:kt});
+      renderRows();
+    }
+    ftPending = null;
+    logLine("rx", `RX FT_STATE weight=${weight}g net=${net}mA torque=${torque}uNm kt=${kt}`);
+  }
+}
+
+function startFtPoll(){
+  stopFtPoll();
+  ftPoll = setInterval(()=>send(CMD.FT_GET), 250);
+}
+function stopFtPoll(){ if (ftPoll){ clearInterval(ftPoll); ftPoll=null; } }
+
+async function ftCommand(cmd, weight){
+  const p = new Uint8Array(5);
+  const d = new DataView(p.buffer);
+  d.setUint8(0, cmd); d.setInt32(1, weight|0, true);
+  ftPending = weight;
+  await send(CMD.FT_CMD, p);
+  startFtPoll();
+}
+
+$("btnTare").onclick    = ()=> ftCommand(FT.TARE, 0);
+$("btnMeasure").onclick = ()=> ftCommand(FT.MEASURE, parseInt($("weightG").value,10)||0);
+$("btnClearTable").onclick = ()=>{ rows.length=0; renderRows(); };
+
+function renderRows(){
+  const tb = $("ftTable").querySelector("tbody");
+  tb.innerHTML = "";
+  rows.forEach((r,i)=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${i+1}</td><td>${r.w}</td><td>${r.i}</td>`
+                 + `<td>${r.t}</td><td>${r.kt}</td>`;
+    const td = document.createElement("td");
+    const b = document.createElement("button");
+    b.textContent="xoá";
+    b.onclick = ()=>{ rows.splice(i,1); renderRows(); };
+    td.appendChild(b); tr.appendChild(td);
+    tb.appendChild(tr);
+  });
+  drawFit();
+}
+
+/* Hồi quy tuyến tính qua gốc: kt = sum(x*y)/sum(x*x) */
+let lastFit = 0;
+function drawFit(){
+  const c = $("chartFit");
+  const {g,w,h} = fitCanvas(c);
+  g.clearRect(0,0,w,h);
+
+  const pts = rows.filter(r=>r.i>0);
+  let sxy=0, sxx=0;
+  for (const r of pts){ sxy += r.i*r.t; sxx += r.i*r.i; }
+  lastFit = sxx ? sxy/sxx : 0;
+  $("fitOut").textContent = pts.length>=2
+    ? `fit qua gốc: kt = ${lastFit.toFixed(1)} µN·m/mA  (n=${pts.length})`
+    : "cần ít nhất 2 điểm để fit";
+
+  if (!pts.length) return;
+  const xm = Math.max(...pts.map(r=>r.i))*1.15 || 1;
+  const ym = Math.max(...pts.map(r=>r.t))*1.15 || 1;
+  const X = x => 52 + (x/xm)*(w-72);
+  const Y = y => h-28 - (y/ym)*(h-46);
+
+  g.strokeStyle="#2c3542"; g.fillStyle="#8b97a8";
+  g.font="10px ui-monospace,monospace"; g.lineWidth=1;
+  for (let i=0;i<=3;i++){
+    const y = Y(ym*i/3);
+    g.beginPath(); g.moveTo(52,y); g.lineTo(w-8,y); g.stroke();
+    g.textAlign="right"; g.fillText((ym*i/3/1000).toFixed(1), 48, y+3);
+  }
+  g.textAlign="center";
+  g.fillText("dòng thực (mA)", w/2, h-8);
+
+  if (pts.length>=2){
+    g.strokeStyle="#ffb020"; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(X(0),Y(0)); g.lineTo(X(xm),Y(lastFit*xm)); g.stroke();
+  }
+  g.fillStyle="#4ea3ff";
+  for (const r of pts){
+    g.beginPath(); g.arc(X(r.i), Y(r.t), 4.5, 0, Math.PI*2); g.fill();
+    g.fillStyle="#8b97a8"; g.textAlign="left";
+    g.fillText(r.w+"g", X(r.i)+8, Y(r.t)-6);
+    g.fillStyle="#4ea3ff";
+  }
+}
+
+/* ==================== CalibrationData ==================== */
+/* 48 byte: joints[0] 4 float, joints[1] 4 float, motor 3 float, crc u32 */
+let calBuf = new Uint8Array(48);
+
+function onCalData(v){
+  if (v.byteLength < 48){ logLine("er","CAL_DATA ngắn: "+v.byteLength+" byte"); return; }
+  calBuf = new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset+48));
+  $("calRate").value  = v.getFloat32(32,true).toFixed(4);
+  $("calGain").value  = v.getFloat32(36,true).toFixed(4);
+  $("calLimit").value = v.getFloat32(40,true).toFixed(4);
+  logLine("rx", "RX CAL_DATA crc=0x"+v.getUint32(44,true).toString(16));
+}
+
+$("btnCalGet").onclick = ()=> send(CMD.CAL_GET);
+$("btnUseFit").onclick = ()=>{
+  if (!lastFit){ alert("Chưa fit được: cần ít nhất 2 điểm đo."); return; }
+  $("calRate").value = lastFit.toFixed(4);
+};
+$("btnCalSave").onclick = async ()=>{
+  const p = new Uint8Array(calBuf);
+  const d = new DataView(p.buffer);
+  d.setFloat32(32, parseFloat($("calRate").value)||0, true);
+  d.setFloat32(36, parseFloat($("calGain").value)||0, true);
+  d.setFloat32(40, parseFloat($("calLimit").value)||0, true);
+  await send(CMD.CAL_SET, p);
+  await new Promise(r=>setTimeout(r,120));
+  await send(CMD.CAL_SAVE);
+};
+
+/* ==================== Register ==================== */
+const REGS = [
+  [0,2,"Model Number"],[6,1,"Firmware Version"],[7,1,"ID"],[8,1,"Baud Rate"],
+  [10,1,"Drive Mode"],[11,1,"Operating Mode"],[20,4,"Homing Offset"],
+  [31,1,"Temperature Limit"],[36,2,"PWM Limit"],[38,2,"Current Limit"],
+  [44,4,"Velocity Limit"],[48,4,"Max Position Limit"],[52,4,"Min Position Limit"],
+  [64,1,"Torque Enable"],[65,1,"LED"],[70,1,"Hardware Error Status"],
+  [76,2,"Velocity I Gain"],[78,2,"Velocity P Gain"],[80,2,"Position D Gain"],
+  [82,2,"Position I Gain"],[84,2,"Position P Gain"],
+  [100,2,"Goal PWM"],[102,2,"Goal Current"],[104,4,"Goal Velocity"],
+  [108,4,"Profile Acceleration"],[112,4,"Profile Velocity"],[116,4,"Goal Position"],
+  [122,1,"Moving"],[124,2,"Present PWM"],[126,2,"Present Current"],
+  [128,4,"Present Velocity"],[132,4,"Present Position"],
+  [144,2,"Present Input Voltage"],[146,1,"Present Temperature"],
+];
+const EEPROM_MAX = 63;   // addr <= 63 nằm trong EEPROM
+
+(function fillRegs(){
+  const sel=$("regPick");
+  for (const [a,l,n] of REGS){
+    const o=document.createElement("option");
+    o.value = a+","+l;
+    o.textContent = `${a}  ${n}${a<=EEPROM_MAX?"  (EEPROM)":""}`;
+    sel.appendChild(o);
+  }
+  sel.value = "132,4";
+  sel.onchange = ()=>{
+    const [a,l] = sel.value.split(",");
+    $("regAddr").value = a; $("regLen").value = l;
+    updateRegWarn();
+  };
+})();
+
+function updateRegWarn(){
+  const addr = parseInt($("regAddr").value,10);
+  const w = $("regWarn");
+  if (addr <= EEPROM_MAX){
+    w.className = "banner warn show";
+    w.innerHTML = "<b>Vùng EEPROM.</b> Ghi nhầm ID hoặc Baud Rate sẽ làm mất liên lạc "
+      + "với motor, phải cắm U2D2 để cứu. Ngoài ra XL330 chỉ cho ghi EEPROM khi "
+      + "Torque Enable = 0 — ghi lúc torque đang bật sẽ trả về lỗi bus.";
+  } else {
+    w.className = "banner warn";
+  }
+  resetWriteBtn();
+}
+$("regAddr").oninput = updateRegWarn;
+
+let armed = false, armTimer = null;
+function resetWriteBtn(){
+  armed = false;
+  if (armTimer){ clearTimeout(armTimer); armTimer=null; }
+  $("btnRegWrite").textContent = "Ghi";
+}
+
+$("btnRegRead").onclick = async ()=>{
+  const p = new Uint8Array(4), d = new DataView(p.buffer);
+  d.setUint8(0, parseInt($("regId").value,10)||0);
+  d.setUint16(1, parseInt($("regAddr").value,10)||0, true);
+  d.setUint8(3, parseInt($("regLen").value,10)||1);
+  await send(CMD.REG_READ, p);
+};
+
+$("btnRegWrite").onclick = async ()=>{
+  const addr = parseInt($("regAddr").value,10)||0;
+
+  // Vùng EEPROM: bắt bấm hai lần (thiết kế đã chốt phương án b).
+  if (addr <= EEPROM_MAX && !armed){
+    armed = true;
+    $("btnRegWrite").textContent = "Bấm lại để xác nhận ghi EEPROM";
+    armTimer = setTimeout(resetWriteBtn, 10000);
+    return;
+  }
+  resetWriteBtn();
+
+  const p = new Uint8Array(8), d = new DataView(p.buffer);
+  d.setUint8(0, parseInt($("regId").value,10)||0);
+  d.setUint16(1, addr, true);
+  d.setUint8(3, parseInt($("regLen").value,10)||1);
+  d.setUint32(4, parseInt($("regVal").value,10)||0, true);
+  await send(CMD.REG_WRITE, p);
+};
+
+function onRegValue(id, addr, len, val){
+  $("regVal").value = val;
+  const name = (REGS.find(r=>r[0]===addr)||[,, "?"])[2];
+  $("regState").textContent = `ID ${id} · addr ${addr} (${name}) · len ${len} = ${val}`;
+  logLine("rx", `RX REG_VALUE id=${id} addr=${addr} len=${len} val=${val}`);
+}
+
+/* ==================== Tabs / khởi động ==================== */
+document.querySelectorAll("nav button").forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll("nav button").forEach(x=>x.classList.remove("sel"));
+    document.querySelectorAll("section").forEach(x=>x.classList.remove("sel"));
+    b.classList.add("sel");
+    $("tab-"+b.dataset.tab).classList.add("sel");
+  };
+});
+
+$("btnConnect").onclick = connect;
+$("btnDisconnect").onclick = disconnect;
+
+/* Web Serial vắng mặt vì hai lý do rất khác nhau — nói rõ lý do nào. */
+(function checkEnv(){
+  if ("serial" in navigator) return;
+  const b = $("unsupported");
+  $("btnConnect").disabled = true;
+  b.classList.add("show");
+
+  if (!window.isSecureContext){
+    b.innerHTML = "<b>Trang không ở secure context.</b> Web Serial chỉ chạy trên "
+      + "<code>https://</code> hoặc <code>http://localhost</code>. "
+      + "Địa chỉ hiện tại là <code>" + location.origin + "</code>"
+      + (location.protocol === "file:"
+          ? " — mở bằng file:// không dùng được, phải chạy qua http.server."
+          : " — dùng IP LAN cũng không được, phải đổi sang localhost hoặc 127.0.0.1.");
+  } else {
+    b.innerHTML = "<b>Trình duyệt này không có Web Serial API.</b> "
+      + "Firefox và Safari không hỗ trợ. Mở lại trang bằng Chrome hoặc Edge "
+      + "trên desktop (bản Chromium đóng gói snap/flatpak cũng có thể bị chặn).";
+  }
+})();
+updateRegWarn();
+window.addEventListener("resize", ()=>{
+  drawSeries($("chartCur"), hCur, "#4ea3ff");
+  drawSeries($("chartPos"), hPos, "#3ddc84");
+  drawFit();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+#ifndef DXL_CONFIG_H_
+#define DXL_CONFIG_H_
+
+#ifndef DXL_MAX_PARAM_LEN
+#define DXL_MAX_PARAM_LEN 256u
+#endif
+#ifndef DXL_MAX_PACKET_SIZE
+#define DXL_MAX_PACKET_SIZE 512u
+#endif
+#ifndef DXL_DEFAULT_TIMEOUT_MS
+#define DXL_DEFAULT_TIMEOUT_MS 20u
+#endif
+#ifndef DXL_ENABLE_SHORT_API_ALIASES
+#define DXL_ENABLE_SHORT_API_ALIASES 0
+#endif
+
+#endif
